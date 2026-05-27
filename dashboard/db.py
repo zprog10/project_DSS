@@ -15,16 +15,30 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 
 
+def _secret(key: str, default=None):
+    """Read a credential from st.secrets (Streamlit Cloud) or .env (local).
+
+    st.secrets wins when available — that's how Streamlit Cloud injects values.
+    Falls back to environment variables loaded by python-dotenv for local dev.
+    """
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except (FileNotFoundError, KeyError, AttributeError):
+        pass  # st.secrets unavailable (e.g. running outside a Streamlit context)
+    return os.getenv(key, default)
+
+
 @st.cache_resource(show_spinner=False)
 def get_engine():
-    load_dotenv(override=True)
+    load_dotenv(override=False)  # local-only; no-op on Streamlit Cloud
     url = URL.create(
         "postgresql+psycopg2",
-        username=os.getenv("SUPABASE_USER"),
-        password=os.getenv("SUPABASE_PASSWORD"),
-        host=os.getenv("SUPABASE_URL"),
-        port=int(os.getenv("SUPABASE_PORT", 5432)),
-        database=os.getenv("SUPABASE_DB"),
+        username=_secret("SUPABASE_USER"),
+        password=_secret("SUPABASE_PASSWORD"),
+        host=_secret("SUPABASE_URL"),
+        port=int(_secret("SUPABASE_PORT", 5432)),
+        database=_secret("SUPABASE_DB"),
         query={"sslmode": "require"},
     )
     return create_engine(url, pool_pre_ping=True)
