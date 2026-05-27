@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "generated": "2026-05-05T02:51:57.032990+00:00",
+    "source_dir": "tmp_snapshots"
+  },
+  "tables": [
+    {
+      "table": "cities",
+      "nr_records": 37940,
+      "nr_columns": 5,
+      "pk": "cityid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "countries",
+      "nr_records": 190,
+      "nr_columns": 8,
+      "pk": "countryid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "customercategories",
+      "nr_records": 8,
+      "nr_columns": 2,
+      "pk": "customercategoryid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "customers",
+      "nr_records": 663,
+      "nr_columns": 28,
+      "pk": "customerid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "customertransactions",
+      "nr_records": 97147,
+      "nr_columns": 12,
+      "pk": "customertransactionid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "deliverymethods",
+      "nr_records": 10,
+      "nr_columns": 2,
+      "pk": "deliverymethodid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "paymentmethods",
+      "nr_records": 4,
+      "nr_columns": 2,
+      "pk": "paymentmethodid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "people",
+      "nr_records": 1111,
+      "nr_columns": 18,
+      "pk": "personid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "stateprovinces",
+      "nr_records": 53,
+      "nr_columns": 6,
+      "pk": "stateprovinceid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "stockitems",
+      "nr_records": 227,
+      "nr_columns": 22,
+      "pk": "stockitemid",
+      "pk_uniqueness": "100.00%"
+    },
+    {
+      "table": "transactiontypes",
+      "nr_records": 13,
+      "nr_columns": 2,
+      "pk": "transactiontypeid",
+      "pk_uniqueness": "100.00%"
+    }
+  ]
+}
