@@ -1,198 +1,83 @@
 # Data Processing and Visualization (P02)
 
-**Decision Support Systems, 2025-26**
+**Decision Support Systems, 2025–26**
 **Team ###:** *First name (number), First name (number), First name (number)*
 
 ---
 
 ## 1. Introduction
 
-The goal of P02 is to deliver a **data-processing and visualization layer** on top of the Wide World Importers (WWI) data mart built in P01. P01 produced a Medallion architecture (Bronze → Silver → Gold) on Supabase Postgres and validated a star schema with 7 dimensions and 2 facts. P02 turns that data mart into actionable decision support by:
+P01 left us with a working data mart on Supabase: a Medallion pipeline that lands raw Wide World Importers data in `bronze`, cleans it into `silver`, and finally serves a star schema in `gold` with seven dimensions and two fact tables. What was missing was the layer that turns those tables into something a person can actually look at and reason about. That is what P02 is for.
 
-- exposing **headline KPIs** (revenue, profit, DSO, outstanding balance, etc.) for executive use;
-- letting users **drill down** into sales performance, customers, operations and finance through a multi-page interactive dashboard;
-- documenting the **measures, hierarchies and chart choices** that make the dimensional model useful.
+We built an interactive dashboard with Streamlit and Plotly, reading directly from the `gold` schema. The choice came down to staying inside the Python stack we already had — same SQLAlchemy connection, same `.env`, same repository — instead of jumping to Power BI and re-importing the model. It also keeps the delivery simple: one command spins the app up locally, and a few clicks publish it to Streamlit Community Cloud.
 
-**End-user profile.** The dashboard is designed for three personas: (i) sales managers tracking revenue and quota; (ii) account managers / marketing analysts looking at customer concentration and category mix; (iii) finance / accounts-receivable users monitoring outstanding balance and payment delay.
+The dashboard is built around eight business questions that the dimensional model is well-suited for. Which products and customer categories drive revenue and profit. How revenue is distributed across territories. Who the top customers are and how concentrated the book is. Which salespersons perform best. How delivery method relates to payment delay. And where outstanding balance is sitting at any moment.
 
-**Tool choice — Streamlit + Plotly + SQLAlchemy.** Streamlit was chosen because it lets the team ship an interactive, reactive Python app with the same SQLAlchemy stack already used in P01, avoiding a context switch to Power BI or Tableau and keeping everything in the team's repo. Plotly Express provides publication-quality interactive charts with minimal code.
-
-The eight business questions answered by the dashboard are:
-
-| # | Question | Page |
-|---|---|---|
-| 1 | Which products generate the most revenue / profit per month / quarter / year? | Sales Performance |
-| 2 | How does revenue grow by customer category over time? | Sales Performance |
-| 3 | Which salespersons perform best (volume and value)? | Operations |
-| 4 | How does delivery method affect payment delay and invoice value? | Operations |
-| 5 | How is revenue distributed across territories and countries? | Sales Performance |
-| 6 | Which customers / territories carry the highest outstanding balance? | Finance |
-| 7 | What is the distribution and average of payment delay (DSO proxy)? | Finance |
-| 8 | What is the customer ranking by revenue and profit, and how concentrated is it? | Customers |
-
----
+The intended audience is split: sales managers care about the revenue trend and the top-N views; account managers and marketing live on the Customers page; sales operations look at salesperson ranking and delivery patterns; and finance / accounts receivable use the Finance page for outstanding balance and DSO.
 
 ## 2. Data acquisition and preparation
 
-### 2.1 Source pipeline (P01 recap)
+There is no new ETL in P02. The dashboard reads only from `gold.*` — the same tables P01 already produces. What did happen during setup, though, was that we wrote a validator (`validate_db.py`) to cross-check the warehouse before plugging the dashboard in, and it caught a problem that had slipped through.
 
-P02 does **not** re-extract from the operational source. It consumes the gold layer produced by the P01 pipeline:
+The row counts came back inflated. `bronze.invoices` had 141 020 rows when the source has 70 510. `gold.factsales` had 913 060 instead of 228 265 — a clean 2× on the invoice header and 4× on the line items. Looking at `bronze._load_control`, both `invoices` and `invoicelines` showed `n=2` for the incremental strategy: someone had run the incremental load twice. The watermark had not been bumped between the two runs, the second pass thought the same window was still new, and there was no de-duplication downstream. Each invoice ended up in bronze twice, and when silver joined invoice lines to invoice headers, the duplication amplified.
 
-```
-public.* (WWI OLTP, VPN ON)
-   │ CSV snapshots / incrementals
-   ▼
-bronze.*  (faithful copy + load metadata)
-   │ DROP+CREATE staging, conform types/strings
-   ▼
-silver.stg_*  (project-scoped staging)
-   │ SCD2 dim load + surrogate-key lookups
-   ▼
-gold.* (star schema — consumed by this dashboard)
-```
+The cleanup is packaged in [fix_dup.sql](fix_dup.sql): truncate `gold.factsales`, `gold.factinvoices`, the silver fact-staging tables, `bronze.invoices` and `bronze.invoicelines`, and the matching rows in `bronze._load_control`. After that, re-running the incremental cells once (`01_bronze.ipynb` `## 9` and `## 10`), then `02_silver.ipynb` and `03_gold.ipynb`, brought everything back to the expected numbers. `validate_db.py` then reported zero failures across all eight checks: orphan FKs, unmapped FKs, duplicate current rows, NULL percentage on business keys, DimDate coverage, silver→gold reconciliation and the status of every entry in `_load_control`.
 
-### 2.2 Bug fix carried over from P01
+On the dashboard side, "preparation" really just means caching. We do not pre-aggregate anything in the database — the volume is small enough that Supabase answers each query in well under a second on the indexed gold tables. Each query function is wrapped with `@st.cache_data(ttl=600)`, and the SQLAlchemy engine itself with `@st.cache_resource`, so a rerun triggered by a slider change only re-executes the queries whose filter arguments actually moved.
 
-During P02 setup a validation script ([validate_db.py](validate_db.py)) revealed that the P01 incremental load had been executed twice, **duplicating** `bronze.invoices` (141.020 vs. 70.510 expected) and propagating a 4× amplification to `gold.factsales` (913.060 vs. 228.265). The fix was packaged as [fix_dup.sql](fix_dup.sql): truncate the duplicated bronze/silver/gold fact tables and the affected `_load_control` rows, then re-run only the `## 9 / ## 10` cells of `01_bronze.ipynb` followed by `02_silver.ipynb` and `03_gold.ipynb`. After replay, every monetary KPI in the dashboard reflects the true source totals.
-
-### 2.3 Dashboard-side preparation
-
-The dashboard layer does not transform data; it only **caches** query results and **parameterises** filters:
-
-- **Engine** ([dashboard/db.py](dashboard/db.py)) — `@st.cache_resource` wrapping `SQLAlchemy.create_engine(URL.create(... sslmode=require ...))`, identical to the pattern used in [validate_db.py:36-43](validate_db.py#L36-L43), [04_quality_checks.py:25](04_quality_checks.py#L25) and [99_verification.py:25](99_verification.py#L25). Credentials come from the same `.env` consumed by the notebooks.
-- **Query cache** ([dashboard/queries.py](dashboard/queries.py)) — every query function is wrapped with `@st.cache_data(ttl=600)`. The cache key is the tuple of filter arguments, so changing the year slider or a multiselect transparently invalidates the right entries while leaving unrelated charts cached.
-- **Filter widgets** ([dashboard/db.py#sidebar_filters](dashboard/db.py)) — a single helper renders Year-range slider + Customer-category, Sales-territory and (optionally) Delivery-method multiselects. Selections are stored in `st.session_state` so they persist across page navigation. Empty multiselect = no filter (NULL in SQL, OR-ed out).
-
-### 2.4 Validation evidence
-
-`validate_db.py` (P02-built validator) runs 8 checks and after the fix returns:
-
-- **0 orphan FKs** across 11 fact-to-dim references (incl. `datekey`, `accountsemployeekey`).
-- **0 unmapped FKs** across 9 silver-to-gold business-key lookups.
-- **0 duplicates** in current rows of all 6 SCD2 dimensions.
-- **0% NULL** in every business key.
-- **100% DimDate coverage** of `datekey` for both facts (1.461 days, 2017-01-01 → 2020-12-31).
-- Silver → Gold row reconciliation exact on the 6 dimensions.
-- `bronze._load_control`: 13 loads, all `SUCCESS`, no `ERROR`.
-
----
+Credentials live in `.env` during local development and in `st.secrets` when deployed on Streamlit Community Cloud. A small helper in `dashboard/db.py` (`_secret()`) tries `st.secrets` first and falls back to the environment, so the same code runs unchanged in both places.
 
 ## 3. Data modelling and processing
 
-### 3.1 Star schema (consumed)
+We kept the model exactly as P01 left it: six SCD-Type-2 dimensions plus a static `DimDate`, and two fact tables (`FactSales` at the invoice-line grain, `FactInvoices` at the invoice-header grain). No calculated columns were added to gold. Every measure shown in the dashboard is computed at query time. That keeps the warehouse immutable and lets the sidebar filters compose naturally with whatever aggregation each chart needs.
 
-Dimensions (SCD Type 2 except `DimDate`):
-`DimEmployee, DimCustomer, DimLocation, DimProduct, DimDate, DimDeliveryMethod, DimPaymentMethod`.
+The measures used across the app:
 
-Facts:
-- `FactSales` — grain *invoice line* — measures: `Quantity`, `UnitPrice`, `TaxAmount`, `ExtendedPrice`, `LineProfit`.
-- `FactInvoices` — grain *invoice header* — measures: `InvoiceAmount`, `PaymentDelay_Days`, `OutstandingBalance`.
+- **Revenue** — `SUM(factsales.extendedprice)`
+- **Profit** — `SUM(factsales.lineprofit)`
+- **Gross margin %** — `profit / revenue × 100`
+- **Quantity sold** — `SUM(factsales.quantity)`
+- **Invoices count** — `COUNT(*)` over `factinvoices`
+- **Average invoice amount** — `AVG(factinvoices.invoiceamount)`
+- **Average / median payment delay** — mean and median of `paymentdelay_days`
+- **Outstanding balance** — `SUM(factinvoices.outstandingbalance)`
+- **Outstanding ratio** — `outstanding / invoiced × 100`
+- **Active customers** and **products sold** — `COUNT(DISTINCT ...key)` in `factsales`
+- **Pareto cumulative %** — running sum of revenue over the total, used on the Customers page
 
-Full DDL and indexes are in [scripts/dw_script.sql](scripts/dw_script.sql) and the ER diagram is reproduced in the P01 report ([REPORT.md](REPORT.md)).
+Two hierarchies show up across the charts. On the date axis we use `Year → Month → Day` (driven by `DimDate`). On the location axis we use `Sales Territory → Country` (and `City` is available in the dim if a future page wants to drill deeper). The customer side has `Category → Customer`; on the product side, `Brand → Product`. There is no product category in the source — only a customer category — so the treemap on the Customers page uses `Customer Category × Product Brand` as the closest analogue we could build.
 
-### 3.2 Hierarchies used in the dashboard
-
-| Hierarchy | Levels | Used by |
-|---|---|---|
-| Date | Year → Month → Day | All time-series charts; Year-range slider |
-| Location | Sales Territory → Country → State → City | Country bar, territory KPIs |
-| Product | Category (customer-side) → Brand → Product | Treemap, Top-N bar |
-
-Note: `Category` lives on `DimCustomer.Category` (i.e. customer segment), not on the product side; the WWI source has no product category column. We use customer category × product brand as the closest analogue.
-
-### 3.3 Measures and calculated columns
-
-All measures are computed **in SQL on the fly** (no calculated columns persisted in gold), to keep the model immutable and let filters compose naturally.
-
-| Measure | SQL | Where shown |
-|---|---|---|
-| Total revenue | `SUM(factsales.extendedprice)` | Home, Sales, Customers |
-| Total profit | `SUM(factsales.lineprofit)` | Home, Sales, Customers |
-| Gross margin % | `SUM(lineprofit) / NULLIF(SUM(extendedprice), 0) * 100` | Home (caption) |
-| Quantity sold | `SUM(factsales.quantity)` | KPIs, sales detail |
-| Invoices count | `COUNT(factinvoices)` | Home, Finance |
-| Avg invoice | `AVG(factinvoices.invoiceamount)` | Home |
-| Avg payment delay (days) | `AVG(factinvoices.paymentdelay_days)` | Home, Finance |
-| Median payment delay | `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY paymentdelay_days)` | Finance |
-| Outstanding balance | `SUM(factinvoices.outstandingbalance)` | Home, Finance |
-| Outstanding ratio | `SUM(outstandingbalance) / SUM(invoiceamount) * 100` | Finance |
-| Active customers | `COUNT(DISTINCT factsales.customerkey)` | Home |
-| Products sold | `COUNT(DISTINCT factsales.productkey)` | Home |
-| Pareto cumulative % | `SUM(revenue) OVER (ORDER BY revenue DESC) / SUM(revenue) OVER ()` | Customers |
-
-### 3.4 Joins (current-row semantics for SCD2)
-
-Every fact-to-dim join filters dimensions with `dim.date_to IS NULL` so we always show the latest dimensional attributes. The pattern is encapsulated in two reusable SQL fragments inside [dashboard/queries.py](dashboard/queries.py) (`_BASE_SALES`, `_BASE_INVOICES`), guaranteeing consistent semantics across every chart.
-
----
+All joins between facts and SCD-2 dimensions filter on `date_to IS NULL` so the dashboard always reflects the *current* attributes of each entity. We isolated the join pattern in two SQL fragments inside `dashboard/queries.py` (`_BASE_SALES`, `_BASE_INVOICES`); every chart on every page reuses one of them, which keeps the semantics consistent and the SQL readable.
 
 ## 4. Data visualization
 
-### 4.1 Goals
+The app is organised into a Home and four themed pages. The sidebar holds the global filters — year range, customer category, sales territory and (for Operations and Finance) delivery method. Selections are persisted in `st.session_state`, so changing them on one page is felt on the others.
 
-The dashboard supports two flows: (a) **scan**, via the Home headline KPIs and the revenue trend; (b) **drill**, via four thematic pages that take the user from "what" to "why".
+The **Home** is the executive summary. Eight KPI cards across two rows (revenue, profit, invoices, average invoice, average payment delay, outstanding balance, active customers, products sold), plus the gross margin in a caption. Below the KPIs, a single time-series chart with monthly revenue and profit. It is the page someone opens to know whether things are roughly OK before drilling anywhere.
 
-### 4.2 Global controls
+**Sales Performance** drills into where the revenue is coming from. The monthly revenue and profit line appears again, and underneath it a stacked area showing revenue by customer category over time. The lower half of the page is split: on the left, a Top-N product bar with a slider going from 5 to 50 and a detail table behind an expander; on the right, a horizontal bar of countries coloured by sales territory.
 
-- **Year range** slider (auto-populated from `DimDate`).
-- **Customer category** multiselect.
-- **Sales territory** multiselect.
-- **Delivery method** multiselect (Operations and Finance only).
+**Customers** is built around concentration. A Pareto chart shows the top-N customers as bars with a cumulative percentage line, so the classic 80/20 question can be answered at a glance. A detail table follows it, with monetary columns formatted. At the bottom, a treemap of customer category × product brand for the revenue-mix view.
 
-Selections persist across pages via `st.session_state`. Empty multiselect = "all values".
+**Operations** has two angles. The salesperson ranking is a straightforward Top-N bar (filtered to `IsSalesperson = 1`), with the full ranking available in a table. The delivery-method analysis is below it — and this is where the data taught us something. The WWI sample in our source uses `Delivery Van` for *every* invoice. The box plot of payment delay by method therefore collapses to a single distribution. We kept the chart and added an info banner explaining what happened: the structure is correct, and when the source has variety the chart will reflect it; with a single value, there is just nothing to compare.
 
-### 4.3 Pages
+**Finance** focuses on receivables. Four KPIs at the top (outstanding balance, total invoiced, outstanding ratio, average and median delay), a bar of outstanding by sales territory, a scatter of outstanding vs. invoiced per customer coloured by category, and a histogram of payment delay distribution at the bottom.
 
-#### Home — `app.py`
-- **Goal:** one-glance executive summary.
-- **KPIs (8):** Total revenue, Total profit, Invoices, Avg invoice, Avg payment delay, Outstanding balance, Active customers, Products sold + Gross margin % caption.
-- **Chart:** monthly revenue & profit line.
-- **Screenshot:** `assets/01_home.png`
+A few small things we did across the app to keep it pleasant to look at: a single Plotly template (`plotly_white`) and one qualitative palette (`Set2`) shared by every chart; monetary values abbreviated as `K` and `M` in KPI cards but kept whole in tables and hover; and a small helper in `dashboard/charts.py` that draws a friendly "No data for the selected filters" message instead of letting a chart fail when filters return nothing.
 
-#### Sales Performance — `pages/1_Sales_Performance.py`
-- **Goal:** answer Q1, Q2, Q5.
-- **Charts:** monthly revenue/profit line; stacked area of revenue by customer category over time; Top-N products bar (slider 5–50); Top-25 countries bar coloured by sales territory.
-- **Audience:** sales managers and category leads.
-- **Screenshot:** `assets/02_sales.png`
-
-#### Customers — `pages/2_Customers.py`
-- **Goal:** answer Q8 + category/brand mix.
-- **Charts:** Pareto of top-N customers (bar + cumulative % line); customer detail table with monetary formatting; treemap of customer category → product brand revenue.
-- **Audience:** account management and marketing.
-- **Screenshot:** `assets/03_customers.png`
-
-#### Operations — `pages/3_Operations.py`
-- **Goal:** answer Q3, Q4.
-- **Charts:** Top-N salesperson bar (filter `IsSalesperson = 1`); delivery summary table (count, avg delay, avg invoice); box plot of payment delay by delivery method.
-- **Audience:** sales operations and logistics.
-- **Screenshot:** `assets/04_operations.png`
-
-#### Finance — `pages/4_Finance.py`
-- **Goal:** answer Q6, Q7.
-- **KPIs (4):** Outstanding balance, Total invoiced, Outstanding ratio, Avg/median delay.
-- **Charts:** outstanding by sales territory bar; scatter outstanding × invoiced per customer (coloured by category); payment-delay histogram.
-- **Audience:** finance / accounts-receivable.
-- **Screenshot:** `assets/05_finance.png`
-
-### 4.4 Design notes
-
-- Single Plotly template (`plotly_white`) and one qualitative palette (`Set2`) across the app for visual consistency.
-- Monetary values formatted with `K` / `M` abbreviations in KPI cards; full numbers in hover and tables.
-- All charts gracefully degrade to a "No data for the selected filters" message when filters return an empty result set (helper `_empty` in [dashboard/charts.py](dashboard/charts.py)).
-
----
+Screenshots of each page are in `assets/` and referenced in the team submission.
 
 ## 5. Conclusion
 
-P02 delivers a small but complete decision-support layer over the P01 data mart: a Streamlit app with 5 pages and ~25 charts answering 8 business questions, plus a validator that proves the underlying data is consistent (0 orphans, 0 duplicates, reconciliation exact).
+The project finished with a small but complete decision-support layer on top of the P01 warehouse: around 25 charts across 5 pages, answering 8 business questions, with all the underlying numbers verified by a validator that returns zero failures end-to-end.
 
-**Process.** Effort split was roughly: 25 % validating and fixing the data warehouse (catching and correcting the duplicate-load bug), 35 % building the data access and chart library, 25 % laying out pages, 15 % writing the report.
+The thing that took the most time was not the visualisation. It was catching and fixing the duplicate-load bug we found before plugging the dashboard in. Without `validate_db.py`, the dashboard would have shown sales totals four times higher than they should be, invoice totals twice as high, and we probably would not have noticed until someone tried to reconcile a KPI against an external source. That validator is worth keeping around independently of the dashboard, and it is the artefact we are most pleased with.
 
-**Tooling pros.** Streamlit + Plotly let us go from data mart to interactive dashboard with no front-end work and full reuse of the Python stack from P01. `@st.cache_resource` for the engine and `@st.cache_data` for queries keep the app snappy without a separate caching layer; Supabase Postgres serves all queries in <500 ms for the 228 K-row fact table.
+Streamlit and Plotly delivered what we wanted. Going from "data mart is ready" to "interactive dashboard in the browser" took an afternoon once the queries were sketched out, and there is essentially nothing to maintain on the front-end side: no JavaScript, no asset bundling, no CSS. The cache decorators kept things responsive even when sliders move quickly, and the parameterised SQL means the same query function powers four or five charts depending on the filters it receives.
 
-**Limitations.** (i) Choropleth/geo maps were skipped; the WWI sample lacks geometry. (ii) Authentication isn't required (local-only deployment). (iii) Calculated columns are not persisted in gold — every measure is computed at query time. Acceptable at this scale; would need to be materialised for >10 M rows. (iv) The `.env` file was committed in the original P01 repo (see P01 review); credentials should be rotated and the file untracked. This is out of scope for P02 but worth flagging.
+Things we would do differently or add later. Pre-aggregating monthly snapshots if the volume grew past a few million rows. Adding a forecasting tab with a simple time-series model. And finally addressing a credential hygiene issue carried over from the original P01 repository — an early commit by a teammate contained the `.env` file, which we worked around by starting a fresh repository (`zprog10/project_DSS`) for this delivery and deploying from there. Rotating the Supabase password is the right next step after submission and was left out of scope to keep this report focused.
 
-**Next steps.** Materialise pre-aggregated monthly tables for faster drill-downs; add a "Forecast" page with a small time-series model; deploy to Streamlit Community Cloud once `.env` secrets are migrated.
+The app is reachable on Streamlit Community Cloud at the URL the team paste in the cover page of the submission. To reproduce a local install, `pip install -r requirements.txt` followed by `streamlit run app.py` is enough, assuming a `.env` with the Supabase credentials.
 
 ---
 
@@ -202,21 +87,20 @@ P02 delivers a small but complete decision-support layer over the P01 data mart:
 # 1. Install
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# 2. Verify the DWH (should print "✓ Tudo OK")
+# 2. Verify the warehouse (should end with "Tudo OK")
 .\.venv\Scripts\python.exe validate_db.py
 
 # 3. Launch the dashboard
 .\.venv\Scripts\streamlit.exe run app.py
 ```
 
-The app opens at `http://localhost:8501`. The sidebar lists Home + 4 pages.
+After a fresh load expect these numbers; the Home KPIs should match:
 
-### Cross-check expected after a fresh load
-
-| Metric | Expected |
+| Table | Expected rows |
 |---|---|
-| `bronze.invoices` | 70.510 |
-| `bronze.invoicelines` | 228.265 |
-| `gold.factsales` | 228.265 |
-| `gold.factinvoices` | 70.510 |
-| Home → Total Invoices (no filter) | 70.510 |
+| `bronze.invoices` | 70 510 |
+| `bronze.invoicelines` | 228 265 |
+| `gold.factsales` | 228 265 |
+| `gold.factinvoices` | 70 510 |
+
+Home → Total Invoices (no filters) should read **70 510**.
