@@ -22,30 +22,30 @@ st.caption(
 filters = sidebar_filters(include_delivery=False)
 
 # ---- Revenue & profit over time ---------------------------------------------
-st.subheader("Revenue & profit over time")
+st.subheader("Receita e lucro ao longo do tempo")
 df = revenue_by_month(filters["year_range"], filters["categories"], filters["territories"])
-st.plotly_chart(line_revenue(df), use_container_width=True)
+st.plotly_chart(line_revenue(df, title="Receita e lucro mensal"), use_container_width=True)
 
 # ---- Category growth --------------------------------------------------------
-st.subheader("Customer category growth")
+st.subheader("Crescimento por categoria de cliente")
 df_cat = revenue_by_category_year(filters["year_range"], filters["categories"], filters["territories"])
-st.plotly_chart(area_category_year(df_cat), use_container_width=True)
+st.plotly_chart(area_category_year(df_cat, title="Receita por categoria ao longo do tempo"), use_container_width=True)
 
 # ---- Top products + Top countries (side by side) ----------------------------
 left, right = st.columns([3, 2])
 with left:
-    st.subheader("Top products")
-    top_n = st.slider("Show top N products", 5, 50, 20, key="top_products_n")
+    st.subheader("Principais produtos")
+    top_n = st.slider("Top N produtos", 5, 50, 20, key="top_products_n")
     df_top = top_products(filters["year_range"], filters["categories"], filters["territories"], n=top_n)
     st.plotly_chart(
         bar_top(df_top, x="product", y="revenue", color="brand",
-                title=f"Top {top_n} products by revenue"),
+                title=f"Top {top_n} produtos por receita"),
         use_container_width=True,
     )
-    with st.expander("Detail table"):
+    with st.expander("Tabela detalhada"):
         st.dataframe(df_top, use_container_width=True, hide_index=True)
 
 with right:
-    st.subheader("Revenue by country")
+    st.subheader("Receita por país")
     df_geo = revenue_by_country(filters["year_range"], filters["categories"], filters["territories"])
-    st.plotly_chart(bar_country(df_geo, top=25), use_container_width=True)
+    st.plotly_chart(bar_country(df_geo, top=25, title="Receita por país"), use_container_width=True)

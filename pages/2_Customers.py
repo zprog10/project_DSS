@@ -19,18 +19,18 @@ st.caption(
 filters = sidebar_filters(include_delivery=False)
 
 # ---- Top customers bar -------------------------------------------------------
-st.subheader("Top customers by revenue")
-n = st.slider("Show top N customers", 10, 100, 30, key="customers_n")
+st.subheader("Principais clientes por receita")
+n = st.slider("Top N clientes", 10, 100, 30, key="customers_n")
 df = customers_ranking(filters["year_range"], filters["categories"], filters["territories"], n=n)
 
 st.plotly_chart(
     bar_top(df, x="customer", y="revenue", color="category",
-            title=f"Top {n} customers by revenue"),
+            title=f"Top {n} clientes por receita"),
     use_container_width=True,
 )
 
 # ---- Detail table ------------------------------------------------------------
-st.subheader("Top customers — detail")
+st.subheader("Detalhe dos principais clientes")
 view = df.copy()
 if not view.empty:
     view["revenue"] = view["revenue"].apply(fmt_money)
@@ -38,6 +38,6 @@ if not view.empty:
 st.dataframe(view, use_container_width=True, hide_index=True)
 
 # ---- Category mix ------------------------------------------------------------
-st.subheader("Revenue mix: customer category × product brand")
+st.subheader("Mix de receita: categoria de cliente × marca do produto")
 df_mix = category_brand_mix(filters["year_range"], filters["categories"], filters["territories"])
-st.plotly_chart(treemap_category_brand(df_mix), use_container_width=True)
+st.plotly_chart(treemap_category_brand(df_mix, title="Receita por categoria e marca"), use_container_width=True)

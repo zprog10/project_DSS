@@ -19,28 +19,28 @@ st.caption(
 filters = sidebar_filters(include_delivery=False)
 
 # ---- Salesperson ranking by revenue -----------------------------------------
-st.subheader("Salesperson ranking — by revenue")
+st.subheader("Ranking de vendedores — por receita")
 df_sp = salesperson_performance(filters["year_range"], filters["categories"], filters["territories"])
-top_n = st.slider("Show top N salespersons", 5, 50, 15, key="sp_n")
+top_n = st.slider("Top N vendedores", 5, 50, 15, key="sp_n")
 df_top = df_sp.head(top_n)
 
 st.plotly_chart(
     bar_top(df_top, x="salesperson", y="revenue", color=None,
-            title=f"Top {top_n} salespersons by revenue"),
+            title=f"Top {top_n} vendedores por receita"),
     use_container_width=True,
 )
 
 # ---- Salesperson ranking by quantity ----------------------------------------
-st.subheader("Salesperson ranking — by quantity sold")
+st.subheader("Ranking de vendedores — por quantidade vendida")
 st.plotly_chart(
     bar_top(df_top.sort_values("quantity", ascending=False),
             x="salesperson", y="quantity", color=None,
-            title=f"Top {top_n} salespersons by quantity"),
+            title=f"Top {top_n} vendedores por quantidade"),
     use_container_width=True,
 )
 
 # ---- Detail table -----------------------------------------------------------
-st.subheader("Full salesperson detail")
+st.subheader("Tabela completa de vendedores")
 view = df_sp.copy()
 if not view.empty:
     view["revenue"] = view["revenue"].apply(fmt_money)

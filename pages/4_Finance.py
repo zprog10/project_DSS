@@ -27,28 +27,31 @@ total_invoiced    = float(df_t["invoiced"].sum())    if not df_t.empty else 0.0
 ar_ratio = (total_outstanding / total_invoiced * 100) if total_invoiced else 0
 
 c1, c2, c3 = st.columns(3)
-with c1: kpi_card("Outstanding balance", fmt_money(total_outstanding))
-with c2: kpi_card("Total invoiced",      fmt_money(total_invoiced))
-with c3: kpi_card("Outstanding ratio",   f"{ar_ratio:.1f}%",
-                  help="Outstanding / Invoiced")
+with c1: kpi_card("Saldo pendente", fmt_money(total_outstanding))
+with c2: kpi_card("Total faturado",      fmt_money(total_invoiced))
+with c3: kpi_card("Rácio pendente",   f"{ar_ratio:.1f}%",
+                  help="Pendente / Faturado")
 
 # ---- By territory -----------------------------------------------------------
-st.subheader("Outstanding balance by sales territory")
+st.subheader("Saldo pendente por território de vendas")
 st.plotly_chart(
     bar_top(df_t, x="salesterritory", y="outstanding", color=None,
-            title="Outstanding by territory"),
+            title="Saldo pendente por território"),
     use_container_width=True,
 )
 
 # ---- By customer (scatter + top table) --------------------------------------
-st.subheader("Outstanding by customer")
-n = st.slider("Top N customers (outstanding)", 10, 100, 30, key="fin_n")
+st.subheader("Saldo pendente por cliente")
+n = st.slider("Top N clientes (pendente)", 10, 100, 30, key="fin_n")
 df_c = outstanding_by_customer(filters["year_range"], filters["categories"],
                                filters["territories"], n=n)
 
-st.plotly_chart(scatter_outstanding(df_c), use_container_width=True)
+st.plotly_chart(
+    scatter_outstanding(df_c, title="Saldo pendente vs. faturado (por cliente)"),
+    use_container_width=True,
+)
 
-with st.expander("Top customers — detail"):
+with st.expander("Tabela detalhada"):
     view = df_c.copy()
     if not view.empty:
         view["outstanding"] = view["outstanding"].apply(fmt_money)
