@@ -11,9 +11,9 @@ P01 left us with a working data mart on Supabase: a Medallion pipeline that land
 
 We built an interactive dashboard with Streamlit and Plotly, reading directly from the `gold` schema. The choice came down to staying inside the Python stack we already had — same SQLAlchemy connection, same `.env`, same repository — instead of jumping to Power BI and re-importing the model. It also keeps the delivery simple: one command spins the app up locally, and a few clicks publish it to Streamlit Community Cloud.
 
-The dashboard is built around eight business questions that the dimensional model is well-suited for. Which products and customer categories drive revenue and profit. How revenue is distributed across territories. Who the top customers are and how concentrated the book is. Which salespersons perform best. How delivery method relates to payment delay. And where outstanding balance is sitting at any moment.
+The dashboard is built around six business questions that the dimensional model is well-suited for. Which products and customer categories drive revenue and profit. How revenue is distributed across territories. Who the top customers are. Which salespersons perform best. And where outstanding balance is sitting at any moment.
 
-The intended audience is split: sales managers care about the revenue trend and the top-N views; account managers and marketing live on the Customers page; sales operations look at salesperson ranking and delivery patterns; and finance / accounts receivable use the Finance page for outstanding balance and DSO.
+The intended audience is split: sales managers care about the revenue trend and the top-N views; account managers and marketing live on the Customers page; sales operations look at salesperson rankings; and finance / accounts receivable use the Finance page for outstanding balance analysis.
 
 ## 2. Data acquisition and preparation
 
@@ -39,11 +39,9 @@ The measures used across the app:
 - **Quantity sold** — `SUM(factsales.quantity)`
 - **Invoices count** — `COUNT(*)` over `factinvoices`
 - **Average invoice amount** — `AVG(factinvoices.invoiceamount)`
-- **Average / median payment delay** — mean and median of `paymentdelay_days`
 - **Outstanding balance** — `SUM(factinvoices.outstandingbalance)`
 - **Outstanding ratio** — `outstanding / invoiced × 100`
 - **Active customers** and **products sold** — `COUNT(DISTINCT ...key)` in `factsales`
-- **Pareto cumulative %** — running sum of revenue over the total, used on the Customers page
 
 Two hierarchies show up across the charts. On the date axis we use `Year → Month → Day` (driven by `DimDate`). On the location axis we use `Sales Territory → Country` (and `City` is available in the dim if a future page wants to drill deeper). The customer side has `Category → Customer`; on the product side, `Brand → Product`. There is no product category in the source — only a customer category — so the treemap on the Customers page uses `Customer Category × Product Brand` as the closest analogue we could build.
 
@@ -51,25 +49,25 @@ All joins between facts and SCD-2 dimensions filter on `date_to IS NULL` so the 
 
 ## 4. Data visualization
 
-The app is organised into a Home and four themed pages. The sidebar holds the global filters — year range, customer category, sales territory and (for Operations and Finance) delivery method. Selections are persisted in `st.session_state`, so changing them on one page is felt on the others.
+The app is organised into a Home and four themed pages. The sidebar holds the global filters — year range, customer category and sales territory. Selections are persisted in `st.session_state`, so changing them on one page is felt on the others.
 
-The **Home** is the executive summary. Eight KPI cards across two rows (revenue, profit, invoices, average invoice, average payment delay, outstanding balance, active customers, products sold), plus the gross margin in a caption. Below the KPIs, a single time-series chart with monthly revenue and profit. It is the page someone opens to know whether things are roughly OK before drilling anywhere.
+The **Home** is the executive summary. Eight KPI cards across two rows (revenue, profit, invoices, average invoice, total quantity, outstanding balance, active customers, products sold), plus the gross margin in a caption. Below the KPIs, a single time-series chart with monthly revenue and profit. It is the page someone opens to know whether things are roughly OK before drilling anywhere.
 
 **Sales Performance** drills into where the revenue is coming from. The monthly revenue and profit line appears again, and underneath it a stacked area showing revenue by customer category over time. The lower half of the page is split: on the left, a Top-N product bar with a slider going from 5 to 50 and a detail table behind an expander; on the right, a horizontal bar of countries coloured by sales territory.
 
-**Customers** is built around concentration. A Pareto chart shows the top-N customers as bars with a cumulative percentage line, so the classic 80/20 question can be answered at a glance. A detail table follows it, with monetary columns formatted. At the bottom, a treemap of customer category × product brand for the revenue-mix view.
+**Customers** shows a straightforward Top-N bar of customers ranked by revenue, coloured by category, so it is easy to spot who the biggest accounts are. A formatted detail table follows it. At the bottom, a treemap of customer category × product brand for the revenue-mix view.
 
-**Operations** has two angles. The salesperson ranking is a straightforward Top-N bar (filtered to `IsSalesperson = 1`), with the full ranking available in a table. The delivery-method analysis is below it — and this is where the data taught us something. The WWI sample in our source uses `Delivery Van` for *every* invoice. The box plot of payment delay by method therefore collapses to a single distribution. We kept the chart and added an info banner explaining what happened: the structure is correct, and when the source has variety the chart will reflect it; with a single value, there is just nothing to compare.
+**Operations** focuses on salesperson productivity. Two bar charts rank the team by revenue and by quantity sold, so managers can see whether the same people lead in both. A full detail table with revenue, profit, invoices and quantity rounds the page out.
 
-**Finance** focuses on receivables. Four KPIs at the top (outstanding balance, total invoiced, outstanding ratio, average and median delay), a bar of outstanding by sales territory, a scatter of outstanding vs. invoiced per customer coloured by category, and a histogram of payment delay distribution at the bottom.
+**Finance** focuses on receivables. Three KPIs at the top (outstanding balance, total invoiced, outstanding ratio), a bar of outstanding by sales territory, and a scatter of outstanding vs. invoiced per customer coloured by category. A detail table is available behind an expander.
 
-A few small things we did across the app to keep it pleasant to look at: a single Plotly template (`plotly_white`) and one qualitative palette (`Set2`) shared by every chart; monetary values abbreviated as `K` and `M` in KPI cards but kept whole in tables and hover; and a small helper in `dashboard/charts.py` that draws a friendly "No data for the selected filters" message instead of letting a chart fail when filters return nothing.
+A few small things we did across the app to keep it clean: a single Plotly template (`plotly_white`) and one qualitative palette (`Set2`) shared by every chart; monetary values abbreviated as `K` and `M` in KPI cards but kept whole in tables and hover; and a small helper in `dashboard/charts.py` that draws a friendly "No data for the selected filters" message instead of letting a chart fail when filters return nothing.
 
 Screenshots of each page are in `assets/` and referenced in the team submission.
 
 ## 5. Conclusion
 
-The project finished with a small but complete decision-support layer on top of the P01 warehouse: around 25 charts across 5 pages, answering 8 business questions, with all the underlying numbers verified by a validator that returns zero failures end-to-end.
+The project finished with a focused decision-support layer on top of the P01 warehouse: around 15 charts across 5 pages, answering 6 business questions, with all the underlying numbers verified by a validator that returns zero failures end-to-end.
 
 The thing that took the most time was not the visualisation. It was catching and fixing the duplicate-load bug we found before plugging the dashboard in. Without `validate_db.py`, the dashboard would have shown sales totals four times higher than they should be, invoice totals twice as high, and we probably would not have noticed until someone tried to reconcile a KPI against an external source. That validator is worth keeping around independently of the dashboard, and it is the artefact we are most pleased with.
 

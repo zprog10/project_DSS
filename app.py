@@ -40,8 +40,8 @@ with c3: kpi_card("Invoices",       fmt_int(inv["invoices"]),     help="Count of
 with c4: kpi_card("Avg. invoice",   fmt_money(inv["avg_invoice"]),help="AVG FactInvoices.InvoiceAmount")
 
 c5, c6, c7, c8 = st.columns(4)
-with c5: kpi_card("Avg. payment delay", f"{fmt_float(inv['avg_delay'], 1)} d",
-                  help="AVG FactInvoices.PaymentDelay_Days")
+with c5: kpi_card("Total quantity",      fmt_int(sales["qty"]),
+                  help="Σ FactSales.Quantity")
 with c6: kpi_card("Outstanding balance", fmt_money(inv["outstanding"]),
                   help="Σ FactInvoices.OutstandingBalance")
 with c7: kpi_card("Active customers",    fmt_int(sales["active_customers"]),
@@ -72,11 +72,11 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.markdown("**📈 Sales Performance**  \nRevenue, profit and quantity by product, category, territory and time.")
 with col2:
-    st.markdown("**👥 Customers**  \nTop customers, Pareto curve, category/brand mix.")
+    st.markdown("**👥 Customers**  \nTop customers by revenue, category/brand mix.")
 with col3:
-    st.markdown("**🛠 Operations**  \nSalesperson ranking and delivery-method impact on payment delay.")
+    st.markdown("**🛠 Operations**  \nSalesperson ranking by revenue and volume.")
 with col4:
-    st.markdown("**💰 Finance**  \nOutstanding balance by customer/territory and DSO distribution.")
+    st.markdown("**💰 Finance**  \nOutstanding balance by customer and territory.")
 
 st.caption(
     "Filters in the sidebar apply to every page. Use the Streamlit page menu "

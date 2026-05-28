@@ -7,7 +7,7 @@ import streamlit as st
 
 from dashboard.db import sidebar_filters
 from dashboard.queries import customers_ranking, category_brand_mix
-from dashboard.charts import pareto, treemap_category_brand, fmt_money
+from dashboard.charts import bar_top, treemap_category_brand, fmt_money
 
 st.set_page_config(page_title="Customers", page_icon="👥", layout="wide")
 st.title("👥 Customers")
@@ -18,18 +18,18 @@ st.caption(
 
 filters = sidebar_filters(include_delivery=False)
 
-# ---- Pareto -----------------------------------------------------------------
-st.subheader("Customer Pareto (revenue concentration)")
-n = st.slider("Top N customers", 10, 100, 30, key="customers_n")
+# ---- Top customers bar -------------------------------------------------------
+st.subheader("Top customers by revenue")
+n = st.slider("Show top N customers", 10, 100, 30, key="customers_n")
 df = customers_ranking(filters["year_range"], filters["categories"], filters["territories"], n=n)
 
 st.plotly_chart(
-    pareto(df, value_col="revenue", label_col="customer",
-           title=f"Top {n} customers by revenue (with cumulative share)"),
+    bar_top(df, x="customer", y="revenue", color="category",
+            title=f"Top {n} customers by revenue"),
     use_container_width=True,
 )
 
-# ---- Top table --------------------------------------------------------------
+# ---- Detail table ------------------------------------------------------------
 st.subheader("Top customers — detail")
 view = df.copy()
 if not view.empty:
@@ -37,7 +37,7 @@ if not view.empty:
     view["profit"]  = view["profit"].apply(fmt_money)
 st.dataframe(view, use_container_width=True, hide_index=True)
 
-# ---- Treemap ----------------------------------------------------------------
+# ---- Category mix ------------------------------------------------------------
 st.subheader("Revenue mix: customer category × product brand")
 df_mix = category_brand_mix(filters["year_range"], filters["categories"], filters["territories"])
 st.plotly_chart(treemap_category_brand(df_mix), use_container_width=True)

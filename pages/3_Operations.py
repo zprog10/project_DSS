@@ -1,61 +1,48 @@
-"""Operations — salesperson performance and delivery-method impact on payment delay.
+"""Operations — salesperson performance.
 
-Answers Q3 (salesperson performance) and Q4 (delivery method × payment delay).
+Answers Q3 (which salespersons perform best by volume and value).
 """
 
 import streamlit as st
 
 from dashboard.db import sidebar_filters
-from dashboard.queries import salesperson_performance, delivery_vs_delay, delivery_summary
-from dashboard.charts import bar_top, box_delivery_delay, fmt_money, fmt_float
+from dashboard.queries import salesperson_performance
+from dashboard.charts import bar_top, fmt_money
 
 st.set_page_config(page_title="Operations", page_icon="🛠", layout="wide")
 st.title("🛠 Operations")
 st.caption(
-    "Salesperson productivity and operational impact of delivery methods. "
-    "Audience: sales operations and logistics."
+    "Salesperson productivity: who sells the most and who brings the most value. "
+    "Audience: sales operations and management."
 )
 
-filters = sidebar_filters(include_delivery=True)
+filters = sidebar_filters(include_delivery=False)
 
-# ---- Salesperson ------------------------------------------------------------
-st.subheader("Salesperson ranking")
+# ---- Salesperson ranking by revenue -----------------------------------------
+st.subheader("Salesperson ranking — by revenue")
 df_sp = salesperson_performance(filters["year_range"], filters["categories"], filters["territories"])
 top_n = st.slider("Show top N salespersons", 5, 50, 15, key="sp_n")
-df_top_sp = df_sp.head(top_n)
+df_top = df_sp.head(top_n)
 
 st.plotly_chart(
-    bar_top(df_top_sp, x="salesperson", y="revenue", color=None,
+    bar_top(df_top, x="salesperson", y="revenue", color=None,
             title=f"Top {top_n} salespersons by revenue"),
     use_container_width=True,
 )
 
-with st.expander("Detail table"):
-    view = df_sp.copy()
-    if not view.empty:
-        view["revenue"] = view["revenue"].apply(fmt_money)
-        view["profit"]  = view["profit"].apply(fmt_money)
-    st.dataframe(view, use_container_width=True, hide_index=True)
-
-# ---- Delivery vs delay ------------------------------------------------------
-st.subheader("Delivery method × payment delay")
-
-df_summary = delivery_summary(filters["year_range"], filters["categories"],
-                              filters["territories"], filters["delivery"])
-st.dataframe(df_summary, use_container_width=True, hide_index=True)
-
-df_box = delivery_vs_delay(filters["year_range"], filters["categories"],
-                           filters["territories"], filters["delivery"])
-st.plotly_chart(box_delivery_delay(df_box), use_container_width=True)
-
-if not df_summary.empty and len(df_summary) == 1:
-    st.info(
-        "ℹ️ The WWI source assigns **a single delivery method** (`Delivery Van`) "
-        "to every invoice, so the chart shows only one distribution. "
-        "The delivery-method filter is kept for completeness but acts as a no-op here."
-    )
-
-st.caption(
-    "Box shows the distribution of `FactInvoices.PaymentDelay_Days` per delivery method "
-    "(median + IQR + whiskers). Outliers hidden to keep the chart readable."
+# ---- Salesperson ranking by quantity ----------------------------------------
+st.subheader("Salesperson ranking — by quantity sold")
+st.plotly_chart(
+    bar_top(df_top.sort_values("quantity", ascending=False),
+            x="salesperson", y="quantity", color=None,
+            title=f"Top {top_n} salespersons by quantity"),
+    use_container_width=True,
 )
+
+# ---- Detail table -----------------------------------------------------------
+st.subheader("Full salesperson detail")
+view = df_sp.copy()
+if not view.empty:
+    view["revenue"] = view["revenue"].apply(fmt_money)
+    view["profit"]  = view["profit"].apply(fmt_money)
+st.dataframe(view, use_container_width=True, hide_index=True)
