@@ -150,6 +150,19 @@ def revenue_by_country(year_range, categories=None, territories=None) -> pd.Data
     return _run(sql, _params(year_range, categories, territories))
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def revenue_by_territory(year_range, categories=None, territories=None) -> pd.DataFrame:
+    sql = f"""
+    SELECT l.salesterritory,
+           SUM(f.extendedprice) AS revenue,
+           SUM(f.lineprofit)    AS profit
+    {_BASE_SALES}
+    GROUP BY l.salesterritory
+    ORDER BY revenue DESC
+    """
+    return _run(sql, _params(year_range, categories, territories))
+
+
 # =============================================================================
 # CUSTOMERS
 # =============================================================================
